@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 @Slf4j
 public class NotificationService {
+
     private static final int MAX_ATTEMPTS = 3;
 
     private final List<NotificationChannel> channels;
@@ -25,58 +26,267 @@ public class NotificationService {
     @Value("${app.base-url}")
     private String baseUrl;
 
-    public void notifyContacts(Journey j, Alert.Level level) {
-        String name = j.getUser().getName();
-        String link = baseUrl + "/track/" + j.getTrackingToken();
-        String msg = level == Alert.Level.DURESS_ALERT
-                ? "URGENT: " + name + " may be in danger. Contact them carefully or call emergency services (112). Live location: " + link
-                : name + " has not checked in from their journey to " + j.getDestination()
-                  + ". Please try calling them. Live location: " + link;
+    /**
+     * Sends an alert to all trusted contacts.
+     *
+     * If at least one notification is successfully delivered
+     * to every contact, the method completes normally.
+     *
+     * If a contact has no successful notification channel,
+     * an exception is thrown so the journey remains ACTIVE
+     * and the scheduler can retry later.
+     */
+    public void notifyContacts(
+            Journey j,
+            Alert.Level level) {
 
-        for (TrustedContact c : contacts.findByUserIdOrderByPriorityAsc(j.getUser().getId())) {
-            deliver(j, c, level, msg);
+        String name = j.getUser().getName();
+
+        String link = baseUrl + "/track/" + j.getTrackingToken();
+
+        String msg;
+
+        if (level == Alert.Level.DURESS_ALERT) {
+
+            msg = "URGENT: "
+                    + name
+                    + " may be in danger. "
+                    + "Contact them carefully or call emergency services (112). "
+                    + "Live location: "
+                    + link;
+
+        } else {
+
+            msg = name
+                    + " has not checked in from their journey to "
+                    + j.getDestination()
+                    + ". Please try calling them. "
+                    + "Live location: "
+                    + link;
+        }
+
+        List<TrustedContact> trustedContacts = contacts.findByUserIdOrderByPriorityAsc(
+                j.getUser().getId());
+
+        if (trustedContacts.isEmpty()) {
+
+            throw new IllegalStateException(
+                    "No trusted contacts found for journey "
+                            + j.getId());
+        }
+
+        boolean allContactsNotified = true;
+
+        for (TrustedContact c : trustedContacts) {
+
+            boolean delivered = deliver(
+                    j,
+                    c,
+                    level,
+                    msg);
+
+            if (!delivered) {
+
+                allContactsNotified = false;
+
+                log.error(
+                        "Unable to notify contact {} for journey {}",
+                        c.getId(),
+                        j.getId());
+            }
+        }
+
+        /*
+         * Important:
+         *
+         * If any contact could not be notified,
+         * throw an exception.
+         *
+         * JourneyService will then keep the journey ACTIVE,
+         * allowing the scheduler to retry on the next run.
+         */
+        if (!allContactsNotified) {
+
+            throw new IllegalStateException(
+                    "One or more trusted contacts could not be notified "
+                            + "for journey "
+                            + j.getId());
         }
     }
 
-    /** Tries each channel in order (with retries); falls back to the next channel if one fails. */
-    private void deliver(Journey j, TrustedContact c, Alert.Level level, String msg) {
-        boolean any = false;
+    /**
+     * Attempts to deliver a notification.
+     *
+     * Each available channel gets up to 3 attempts.
+     *
+     * Example:
+     *
+     * EMAIL
+     * attempt 1 -> failed
+     * attempt 2 -> failed
+     * attempt 3 -> failed
+     *
+     * Then the next available channel is tried.
+     *
+     * Returns true when a notification is successfully delivered.
+     */
+    private boolean deliver(
+            Journey j,
+            TrustedContact c,
+            Alert.Level level,
+            String msg) {
+
+        boolean anyReachableChannel = false;
+
         for (NotificationChannel ch : channels) {
-            if (!ch.canReach(c)) continue;
-            any = true;
+
+            if (!ch.canReach(c)) {
+                continue;
+            }
+
+            anyReachableChannel = true;
+
             String lastError = null;
+
             for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+
                 try {
+
+                    log.info(
+                            "Sending {} notification to contact {}. Attempt {}/{}",
+                            ch.name(),
+                            c.getId(),
+                            attempt,
+                            MAX_ATTEMPTS);
+
                     ch.send(c, msg);
-                    record(j, c, level, ch.name(), Alert.Status.SENT, attempt, null);
-                    return; // delivered on this channel: no need for fallback
+
+                    record(
+                            j,
+                            c,
+                            level,
+                            ch.name(),
+                            Alert.Status.SENT,
+                            attempt,
+                            null);
+
+                    log.info(
+                            "{} notification successfully sent to contact {} for journey {}",
+                            ch.name(),
+                            c.getId(),
+                            j.getId());
+
+                    return true;
+
                 } catch (Exception e) {
+
                     lastError = e.getMessage();
-                    log.warn("{} attempt {} failed for contact {}: {}", ch.name(), attempt, c.getId(), lastError);
+
+                    if (lastError == null || lastError.isBlank()) {
+                        lastError = e.getClass().getSimpleName();
+                    }
+
+                    log.warn(
+                            "{} attempt {} failed for contact {}: {}",
+                            ch.name(),
+                            attempt,
+                            c.getId(),
+                            lastError);
+
                     sleep(attempt * 500L);
                 }
             }
-            record(j, c, level, ch.name(), Alert.Status.FAILED, MAX_ATTEMPTS, lastError);
+
+            /*
+             * All attempts for this channel failed.
+             * Record the failure and try the next channel.
+             */
+            record(
+                    j,
+                    c,
+                    level,
+                    ch.name(),
+                    Alert.Status.FAILED,
+                    MAX_ATTEMPTS,
+                    lastError);
+
+            log.warn(
+                    "{} failed after {} attempts for contact {}. Trying next channel.",
+                    ch.name(),
+                    MAX_ATTEMPTS,
+                    c.getId());
         }
-        if (!any) {
-            record(j, c, level, "NONE", Alert.Status.FAILED, 0, "no reachable channel for contact");
+
+        /*
+         * No channel could reach this contact.
+         */
+        if (!anyReachableChannel) {
+
+            record(
+                    j,
+                    c,
+                    level,
+                    "NONE",
+                    Alert.Status.FAILED,
+                    0,
+                    "no reachable channel for contact");
+
+            log.error(
+                    "No reachable notification channel for contact {}",
+                    c.getId());
         }
+
+        return false;
     }
 
-    private void record(Journey j, TrustedContact c, Alert.Level level, String channel,
-                        Alert.Status status, int attempts, String error) {
+    /**
+     * Saves notification delivery result.
+     */
+    private void record(
+            Journey j,
+            TrustedContact c,
+            Alert.Level level,
+            String channel,
+            Alert.Status status,
+            int attempts,
+            String error) {
+
         Alert a = new Alert();
+
         a.setJourneyId(j.getId());
         a.setContactId(c.getId());
         a.setLevel(level);
         a.setChannel(channel);
         a.setStatus(status);
         a.setAttempts(attempts);
-        a.setLastError(error == null ? null : error.substring(0, Math.min(error.length(), 250)));
+
+        if (error == null || error.isBlank()) {
+
+            a.setLastError(null);
+
+        } else {
+
+            a.setLastError(
+                    error.substring(
+                            0,
+                            Math.min(error.length(), 250)));
+        }
+
         alerts.save(a);
     }
 
+    /**
+     * Small delay between notification retries.
+     */
     private static void sleep(long ms) {
-        try { Thread.sleep(ms); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+
+        try {
+
+            Thread.sleep(ms);
+
+        } catch (InterruptedException e) {
+
+            Thread.currentThread().interrupt();
+        }
     }
 }
