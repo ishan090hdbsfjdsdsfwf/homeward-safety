@@ -17,9 +17,10 @@ export default function App() {
   }, [navigate]);
 
   const onAuth = (token) => { setToken(token); setAuthed(true); navigate('/'); };
+
   const logout = () => {
     if (localStorage.getItem('hw_journey') &&
-        !window.confirm('You have a journey in progress. If you sign out, you cannot check in from this device. Sign out anyway?')) return;
+      !window.confirm('You have a journey in progress. If you sign out, you cannot check in from this device. Sign out anyway?')) return;
     setToken(null);
     setAuthed(false);
     navigate('/login');
@@ -41,14 +42,28 @@ export default function App() {
 function Shell({ onLogout }) {
   return (
     <div className="shell">
-      <header className="bar">
-        <NavLink to="/" className="brand">Homeward</NavLink>
-        <nav>
-          <NavLink to="/contacts">Contacts</NavLink>
-          <button className="link" onClick={onLogout}>Sign out</button>
-        </nav>
+      <header className="topbar">
+        <NavLink to="/" className="brand" aria-label="Homeward home">
+          <span className="brand-symbol">✦</span>
+          <span className="brand-word">Homeward</span>
+        </NavLink>
+
+        <div className="topbar-right">
+          <nav className="desktop-nav">
+            <NavLink to="/" end>Home</NavLink>
+            <NavLink to="/contacts">Contacts</NavLink>
+          </nav>
+          <button className="avatar-button" onClick={onLogout} title="Sign out" aria-label="Sign out">↪</button>
+        </div>
       </header>
+
       <Outlet />
+
+      <nav className="mobile-dock" aria-label="Mobile navigation">
+        <NavLink to="/" end><span>⌂</span><small>Home</small></NavLink>
+        <NavLink to="/contacts"><span>♧</span><small>Contacts</small></NavLink>
+        <button onClick={onLogout}><span>↪</span><small>Sign out</small></button>
+      </nav>
     </div>
   );
 }
