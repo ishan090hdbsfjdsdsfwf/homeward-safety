@@ -7,7 +7,7 @@ export default function CountdownRing({ progress, phase, main, sub }) {
 
   return (
     <div className="ring ring-v3" role="timer" aria-live="off">
-      <svg viewBox="0 0 220 220" aria-hidden="true">
+      <svg viewBox="0 0 220 220" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
         <circle cx="110" cy="110" r={R} className="ring-track" />
         <circle cx="110" cy="110" r={R} className="ring-bar"
           style={{ stroke: color, strokeDasharray: C, strokeDashoffset: C * (1 - p) }}
