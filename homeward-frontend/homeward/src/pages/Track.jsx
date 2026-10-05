@@ -1,26 +1,34 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-
 import { api } from '../api.js';
 
 const POLL_MS = 10000;
 
 function ago(iso) {
-  const s = Math.max(
-    0,
-    Math.round((Date.now() - Date.parse(iso)) / 1000)
-  );
+  if (!iso) return '';
 
-  if (s < 30) return 'just now';
+  const parsed = Date.parse(iso);
 
-  if (s < 3600) {
-    return `${Math.round(s / 60)} min ago`;
+  if (Number.isNaN(parsed)) {
+    return '';
   }
 
-  return `${Math.round(s / 3600)} h ago`;
+  const seconds = Math.max(
+    0,
+    Math.round((Date.now() - parsed) / 1000)
+  );
+
+  if (seconds < 30) {
+    return 'just now';
+  }
+
+  if (seconds < 3600) {
+    return `${Math.round(seconds / 60)} min ago`;
+  }
+
+  return `${Math.round(seconds / 3600)} h ago`;
 }
 
 export default function Track() {
@@ -28,34 +36,58 @@ export default function Track() {
 
   const [data, setData] = useState(null);
   const [gone, setGone] = useState(false);
+  const [error, setError] = useState('');
 
   const mapEl = useRef(null);
   const map = useRef(null);
   const marker = useRef(null);
   const centered = useRef(false);
 
+  /*
+   * Load tracking information from the backend.
+   */
   useEffect(() => {
+    if (!token) {
+      setGone(true);
+      return undefined;
+    }
+
     let alive = true;
 
-    const load = () => {
-      api
-        .track(token)
-        .then((result) => {
-          if (!alive) return;
+    const load = async () => {
+      try {
+        const result = await api.track(token);
 
-          setData(result);
-          setGone(false);
-        })
-        .catch((e) => {
-          if (alive && e.status === 404) {
-            setGone(true);
-          }
-        });
+        if (!alive) {
+          return;
+        }
+
+        setData(result);
+        setGone(false);
+        setError('');
+      } catch (err) {
+        if (!alive) {
+          return;
+        }
+
+        if (err.status === 404) {
+          setGone(true);
+          setError('');
+        } else {
+          setError(
+            err.message ||
+            'Unable to load the journey.'
+          );
+        }
+      }
     };
 
     load();
 
-    const timer = setInterval(load, POLL_MS);
+    const timer = setInterval(
+      load,
+      POLL_MS
+    );
 
     return () => {
       alive = false;
@@ -63,233 +95,252 @@ export default function Track() {
     };
   }, [token]);
 
+  /*
+   * Create Leaflet map.
+   */
   useEffect(() => {
-    if (!mapEl.current) return;
+    if (!mapEl.current) {
+      return undefined;
+    }
 
-    map.current = L.map(mapEl.current, {
-      zoomControl: false,
-    }).setView([22.5, 79], 4);
+    let leafletMap;
 
-    L.control
-      .zoom({
-        position: 'bottomright',
-      })
-      .addTo(map.current);
+    try {
+      leafletMap = L.map(
+        mapEl.current,
+        {
+          center: [22.5, 79],
+          zoom: 5,
+          zoomControl: true,
+        }
+      );
 
-    L.tileLayer(
-      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-      {
-        maxZoom: 19,
-        attribution:
-          '&copy; OpenStreetMap contributors',
-      }
-    ).addTo(map.current);
+      map.current = leafletMap;
+
+      L.tileLayer(
+        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        {
+          maxZoom: 19,
+          attribution:
+            '&copy; OpenStreetMap contributors',
+        }
+      ).addTo(leafletMap);
+
+      /*
+       * Leaflet sometimes calculates the container size
+       * incorrectly immediately after mounting.
+       */
+      setTimeout(() => {
+        if (map.current) {
+          map.current.invalidateSize();
+        }
+      }, 100);
+    } catch (err) {
+      console.error(
+        'Leaflet initialization failed:',
+        err
+      );
+
+      setError(
+        'The map could not be loaded. Please refresh the page.'
+      );
+    }
 
     return () => {
-      if (map.current) {
-        map.current.remove();
+      if (leafletMap) {
+        leafletMap.remove();
       }
 
       map.current = null;
       marker.current = null;
+      centered.current = false;
     };
   }, []);
 
+  /*
+   * Update the marker whenever new location data arrives.
+   */
   useEffect(() => {
+    if (!map.current) {
+      return;
+    }
+
     if (
-      !map.current ||
       data?.latitude == null ||
       data?.longitude == null
     ) {
       return;
     }
 
+    const latitude = Number(data.latitude);
+    const longitude = Number(data.longitude);
+
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude)
+    ) {
+      return;
+    }
+
     const position = [
-      data.latitude,
-      data.longitude,
+      latitude,
+      longitude,
     ];
 
     if (!marker.current) {
-      marker.current = L.circleMarker(position, {
-        radius: 11,
+      marker.current =
+        L.circleMarker(
+          position,
+          {
+            radius: 10,
+            color: '#121829',
+            weight: 3,
+            fillColor: '#f4b942',
+            fillOpacity: 1,
+          }
+        ).addTo(map.current);
 
-        color: '#ffffff',
-        weight: 4,
-
-        fillColor:
-          data.status === 'ALERTED'
-            ? '#c84747'
-            : '#267b63',
-
-        fillOpacity: 1,
-      }).addTo(map.current);
+      marker.current.bindPopup(
+        '<strong>Current location</strong>'
+      );
     } else {
-      marker.current.setLatLng(position);
-
-      marker.current.setStyle({
-        fillColor:
-          data.status === 'ALERTED'
-            ? '#c84747'
-            : '#267b63',
-      });
+      marker.current.setLatLng(
+        position
+      );
     }
 
     if (!centered.current) {
-      map.current.setView(position, 16);
+      map.current.setView(
+        position,
+        16
+      );
 
       centered.current = true;
     } else {
-      map.current.panTo(position);
+      map.current.panTo(
+        position,
+        {
+          animate: true,
+          duration: 0.5,
+        }
+      );
     }
+
+    /*
+     * Make sure Leaflet redraws correctly.
+     */
+    setTimeout(() => {
+      if (map.current) {
+        map.current.invalidateSize();
+      }
+    }, 50);
   }, [data]);
 
-  let state = 'loading';
+  let headline = 'Loading…';
+  let tone = '';
 
   if (gone) {
-    state = 'expired';
-  } else if (data?.status === 'ARRIVED') {
-    state = 'arrived';
-  } else if (data?.status === 'ALERTED') {
-    state = 'alerted';
-  } else if (data?.status === 'CANCELLED') {
-    state = 'cancelled';
+    headline =
+      'This link has expired or is not valid.';
   } else if (data) {
-    state = 'travelling';
+    if (data.status === 'ARRIVED') {
+      headline =
+        `${data.name} arrived safely`;
+      tone = 'ok';
+    } else if (data.status === 'ALERTED') {
+      headline =
+        `${data.name} hasn't checked in`;
+      tone = 'bad';
+    } else if (
+      data.status === 'CANCELLED'
+    ) {
+      headline =
+        `${data.name} ended the journey`;
+      tone = 'ok';
+    } else {
+      headline =
+        `${data.name} is on the way to ${data.destination || 'their destination'
+        }`;
+    }
   }
 
-  const config = {
-    loading: {
-      eyebrow: 'HOMEWARD',
-      title: 'Finding the journey…',
-      message: 'Please wait while we connect to the tracking link.',
-      icon: '○',
-    },
-
-    travelling: {
-      eyebrow: 'LIVE JOURNEY',
-      title: `${data.name} is on the way`,
-      message: `Heading to ${data.destination || 'their destination'}.`,
-      icon: '●',
-    },
-
-    arrived: {
-      eyebrow: 'JOURNEY COMPLETE',
-      title: `${data.name} arrived safely`,
-      message: 'This journey has ended. No further tracking is needed.',
-      icon: '✓',
-    },
-
-    alerted: {
-      eyebrow: 'CHECK-IN MISSED',
-      title: `${data.name} hasn't checked in`,
-      message:
-        'Their expected arrival time has passed and their trusted contacts have been alerted.',
-      icon: '!',
-    },
-
-    cancelled: {
-      eyebrow: 'JOURNEY ENDED',
-      title: `${data.name} ended the journey`,
-      message: 'This tracking link is no longer updating.',
-      icon: '✓',
-    },
-
-    expired: {
-      eyebrow: 'HOMEWARD',
-      title: 'Tracking link unavailable',
-      message:
-        'This link has expired or is no longer valid.',
-      icon: '—',
-    },
-  }[state];
+  const hasLocation =
+    data?.latitude != null &&
+    data?.longitude != null;
 
   return (
-    <main className={`public-track public-track-${state}`}>
-      <header className="public-track-header">
-        <div className="public-brand">
-          <span className="public-brand-mark">H</span>
-
-          <span>Homeward</span>
-        </div>
-
-        <span className="public-live-label">
-          {state === 'travelling'
-            ? 'LIVE'
-            : 'SAFETY TRACKING'}
-        </span>
-      </header>
-
-      <section className="public-track-info">
-        <div className="public-track-state">
-          <span>{config.icon}</span>
-
-          {config.eyebrow}
-        </div>
-
-        <h1>{config.title}</h1>
-
-        <p>{config.message}</p>
+    <main className="track">
+      <section
+        className={`track-head ${tone}`}
+      >
+        <h1>{headline}</h1>
 
         {data && !gone && (
-          <div className="public-meta">
-            {data.lastSeen && (
-              <span>
-                <b>●</b>
-                Updated {ago(data.lastSeen)}
-              </span>
-            )}
+          <p>
+            {hasLocation
+              ? `Location updated ${ago(data.lastSeen) ||
+              'recently'
+              }`
+              : 'Waiting for the first location update'}
 
-            {data.batteryPct != null && (
-              <span>
-                Battery {data.batteryPct}%
-              </span>
-            )}
-          </div>
+            {data.batteryPct != null &&
+              ` · battery ${data.batteryPct}%`}
+          </p>
         )}
 
-        {state === 'alerted' && (
-          <div className="public-alert">
-            <strong>Action may be needed</strong>
-
-            <span>
-              Try calling them now. If you cannot reach them,
-              call 112.
-            </span>
-          </div>
-        )}
-      </section>
-
-      <section className="public-map-wrap">
-        <div
-          ref={mapEl}
-          className="public-map"
-          aria-label="Map showing the last known location"
-        />
-
-        {state === 'loading' && (
-          <div className="map-loading">
-            <span />
-            Loading location…
-          </div>
+        {error && (
+          <p className="track-error">
+            {error}
+          </p>
         )}
 
-        {state === 'expired' && (
-          <div className="map-message">
-            <div>—</div>
-            No active tracking
-          </div>
+        {!gone &&
+          data &&
+          !hasLocation &&
+          !error && (
+            <p className="track-waiting">
+              The journey is active, but the
+              phone has not sent a location yet.
+              Keep the journey screen open and
+              allow location access.
+            </p>
+          )}
+
+        {tone === 'bad' && (
+          <p>
+            <strong>
+              Try calling them now. If you can't
+              reach them, call 112.
+            </strong>
+          </p>
         )}
       </section>
 
-      <footer className="public-track-footer">
-        <span>
-          Homeward keeps journeys private.
-        </span>
+      <div
+        ref={mapEl}
+        className="map"
+        aria-label="Map showing the last known location"
+      />
 
-        <span>
-          Location refreshes automatically.
-        </span>
-      </footer>
+      {!hasLocation &&
+        !gone &&
+        !error && (
+          <div className="map-overlay">
+            <div className="map-overlay-card">
+              <div className="map-loader" />
+
+              <strong>
+                Waiting for location
+              </strong>
+
+              <span>
+                The traveler's location will
+                appear here as soon as the phone
+                sends its first GPS update.
+              </span>
+            </div>
+          </div>
+        )}
     </main>
   );
 }

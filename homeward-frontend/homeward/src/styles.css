@@ -3377,3 +3377,68 @@ button {
     display: none;
   }
 }
+
+/* Public tracking improvements */
+
+.track {
+  position: relative;
+}
+
+.track-error {
+  color: #ff6874 !important;
+  font-weight: 700;
+}
+
+.track-waiting {
+  color: #aeb9cc !important;
+}
+
+.map-overlay {
+  position: absolute;
+  inset: 0;
+  top: 145px;
+  z-index: 30;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.map-overlay-card {
+  width: min(90%, 360px);
+  padding: 1.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 18px;
+  background: rgba(13, 26, 49, 0.94);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+  text-align: center;
+}
+
+.map-overlay-card strong {
+  display: block;
+  color: #ffffff;
+  margin-bottom: 0.35rem;
+}
+
+.map-overlay-card span {
+  display: block;
+  color: #aeb9cc;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.map-loader {
+  width: 34px;
+  height: 34px;
+  margin: 0 auto 0.8rem;
+  border: 3px solid rgba(255, 255, 255, 0.18);
+  border-top-color: #f4b942;
+  border-radius: 50%;
+  animation: homeward-map-spin 0.8s linear infinite;
+}
+
+@keyframes homeward-map-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
