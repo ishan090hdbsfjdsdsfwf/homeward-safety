@@ -1,21 +1,124 @@
 import { useState } from 'react';
 
-export default function PinSheet({ onSubmit, onCancel, busy, error }) {
+export default function PinSheet({
+  onSubmit,
+  onCancel,
+  busy,
+  error,
+}) {
   const [pin, setPin] = useState('');
-  const press = (d) => setPin((p) => (p.length < 6 ? p + d : p));
+
+  const press = (digit) => {
+    setPin((current) =>
+      current.length < 6 ? current + digit : current
+    );
+  };
+
+  const remove = () => {
+    setPin((current) => current.slice(0, -1));
+  };
 
   return (
-    <div className="backdrop" role="dialog" aria-modal="true" aria-label="Enter your PIN">
-      <div className="sheet sheet-v3">
-        <div className="sheet-top"><span className="shield-icon">🔐</span><button onClick={onCancel} aria-label="Close">×</button></div>
-        <div className="mini-label">SECURE CHECK-IN</div>
-        <h2>Confirm you're safe</h2>
-        <p className="hint">Enter your check-in PIN. If you didn't set one, leave it empty.</p>
-        <div className="dots">{Array.from({ length: 6 }, (_, i) => <span key={i} className={i < pin.length ? 'on' : ''} />)}</div>
-        {error && <p className="error" role="alert">{error}</p>}
-        <div className="keys">{[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => <button key={d} type="button" onClick={() => press(String(d))}>{d}</button>)}<span /><button type="button" onClick={() => press('0')}>0</button><button type="button" onClick={() => setPin((p) => p.slice(0, -1))}>⌫</button></div>
-        <button className="btn-v3 primary-v3" disabled={busy} onClick={() => onSubmit(pin)}>{busy ? 'Checking in…' : 'Confirm safely  →'}</button>
-        <button className="btn-v3 secondary-v3" style={{ marginTop: '.6rem' }} onClick={onCancel}>Go back</button>
+    <div
+      className="pin-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Check in safely"
+    >
+      <div className="pin-sheet">
+        <button
+          type="button"
+          className="pin-close"
+          onClick={onCancel}
+          aria-label="Close"
+        >
+          ×
+        </button>
+
+        <div className="pin-icon">
+          ✓
+        </div>
+
+        <div className="pin-eyebrow">
+          CHECK IN
+        </div>
+
+        <h2>You're safe?</h2>
+
+        <p className="pin-description">
+          Enter your check-in PIN to let your contacts know
+          you've arrived safely.
+        </p>
+
+        <div
+          className="pin-dots"
+          aria-label={`${pin.length} digits entered`}
+        >
+          {Array.from({ length: 6 }, (_, i) => (
+            <span
+              key={i}
+              className={i < pin.length ? 'filled' : ''}
+            />
+          ))}
+        </div>
+
+        {error && (
+          <div className="pin-error" role="alert">
+            {error}
+          </div>
+        )}
+
+        <div className="pin-keypad">
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((digit) => (
+            <button
+              key={digit}
+              type="button"
+              onClick={() => press(String(digit))}
+            >
+              {digit}
+            </button>
+          ))}
+
+          <span />
+
+          <button
+            type="button"
+            onClick={() => press('0')}
+          >
+            0
+          </button>
+
+          <button
+            type="button"
+            className="delete-key"
+            aria-label="Delete last digit"
+            onClick={remove}
+          >
+            ⌫
+          </button>
+        </div>
+
+        <button
+          type="button"
+          className="pin-confirm"
+          disabled={busy}
+          onClick={() => onSubmit(pin)}
+        >
+          {busy ? 'Checking in…' : "I've arrived safely"}
+          {!busy && <span>→</span>}
+        </button>
+
+        <button
+          type="button"
+          className="pin-cancel"
+          onClick={onCancel}
+        >
+          Cancel
+        </button>
+
+        <p className="pin-footer">
+          Don't have a PIN? You can still continue.
+        </p>
       </div>
     </div>
   );

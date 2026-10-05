@@ -1,125 +1,348 @@
 import { useState } from 'react';
-import { api } from '../api.js';
+import { api, setUserKey } from '../api.js';
 
 export default function Auth({ onAuth }) {
   const [mode, setMode] = useState('login');
-  const [f, setF] = useState({ name: '', email: '', password: '', cancelPin: '', duressPin: '' });
+
+  const [f, setF] = useState({
+    name: '',
+    email: '',
+    password: '',
+    cancelPin: '',
+    duressPin: '',
+  });
+
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+
   const registering = mode === 'register';
+
+  function setField(key) {
+    return (e) => {
+      setF((old) => ({
+        ...old,
+        [key]: e.target.value,
+      }));
+    };
+  }
 
   async function submit(e) {
     e.preventDefault();
     setError('');
-    if (registering && f.cancelPin && f.duressPin && f.cancelPin === f.duressPin) {
-      setError('Your check-in PIN and silent alert PIN must be different.');
+
+    if (
+      registering &&
+      f.cancelPin &&
+      f.duressPin &&
+      f.cancelPin === f.duressPin
+    ) {
+      setError(
+        'Your check-in PIN and silent alert PIN must be different.'
+      );
       return;
     }
+
     setBusy(true);
+
     try {
-      const res = registering
+      const email = f.email.trim().toLowerCase();
+
+      const result = registering
         ? await api.register({
-          name: f.name, email: f.email, password: f.password,
-          cancelPin: f.cancelPin || null, duressPin: f.duressPin || null,
+          name: f.name.trim(),
+          email,
+          password: f.password,
+          cancelPin: f.cancelPin || null,
+          duressPin: f.duressPin || null,
         })
-        : await api.login({ email: f.email, password: f.password });
-      onAuth(res.token);
+        : await api.login({
+          email,
+          password: f.password,
+        });
+
+      /*
+       * Save the current account identifier.
+       *
+       * This lets Homeward keep each user's journey
+       * separate on the same browser/device.
+       */
+      setUserKey(email);
+
+      onAuth(result.token);
     } catch (err) {
-      setError(err.message);
+      setError(
+        err.message ||
+        'Something went wrong. Please try again.'
+      );
     } finally {
       setBusy(false);
     }
   }
 
+  function switchMode() {
+    setMode(registering ? 'login' : 'register');
+    setError('');
+  }
+
   return (
-    <main className="auth-v3">
-      <section className="auth-showcase">
-        <div className="showcase-orb orb-a" />
-        <div className="showcase-orb orb-b" />
+    <main className="auth-screen">
+      <section className="auth-brand">
+        <div className="brand-mark">H</div>
 
-        <NavBrand />
+        <div>
+          <div className="brand-name">Homeward</div>
 
-        <div className="showcase-copy">
-          <div className="mini-label"><span className="pulse" /> PERSONAL SAFETY COMPANION</div>
-          <h1>Get there.<br /><em>Safely.</em></h1>
-          <p>Homeward keeps the people you trust connected to your journey — without making safety feel complicated.</p>
-
-          <div className="showcase-grid">
-            <div><span>⌖</span><strong>Live location</strong><small>Share while your journey is active.</small></div>
-            <div><span>♧</span><strong>Trusted contacts</strong><small>Keep your safety network close.</small></div>
-            <div><span>⏱</span><strong>Smart check-in</strong><small>Know when it's time to check in.</small></div>
-            <div><span>🔐</span><strong>Silent protection</strong><small>A private PIN for emergencies.</small></div>
+          <div className="brand-tagline">
+            Personal safety companion
           </div>
-        </div>
-
-        <div className="showcase-footer">
-          <span>Designed for calm journeys</span>
-          <span>•</span>
-          <span>Your privacy matters</span>
         </div>
       </section>
 
-      <section className="auth-form-side">
-        <div className="auth-form-card">
-          <div className="mobile-only-brand"><NavBrand /></div>
-          <div className="form-kicker">{registering ? 'WELCOME TO HOMEWARD' : 'WELCOME BACK'}</div>
-          <h2>{registering ? 'Create your safe space' : 'Ready to head home?'}</h2>
-          <p className="form-sub">{registering ? 'A few details and you’re ready to start.' : 'Sign in and keep your next journey protected.'}</p>
+      <section className="auth-layout">
+        <div className="auth-intro">
+          <div className="eyebrow">
+            {registering ? 'GET STARTED' : 'WELCOME BACK'}
+          </div>
+
+          <h1>
+            {registering ? (
+              <>
+                Make your journey
+                <br />
+                <em>safer.</em>
+              </>
+            ) : (
+              <>
+                Get there.
+                <br />
+                <em>Safely.</em>
+              </>
+            )}
+          </h1>
+
+          <p>
+            Homeward keeps the people you trust connected to your
+            journey without making safety feel complicated.
+          </p>
+
+          <div className="auth-features">
+            <div className="feature">
+              <span className="feature-icon">⌖</span>
+
+              <div>
+                <strong>Live location</strong>
+
+                <span>
+                  Share your location while your journey is active.
+                </span>
+              </div>
+            </div>
+
+            <div className="feature">
+              <span className="feature-icon">♡</span>
+
+              <div>
+                <strong>Trusted contacts</strong>
+
+                <span>
+                  Keep your safety network close.
+                </span>
+              </div>
+            </div>
+
+            <div className="feature">
+              <span className="feature-icon">✓</span>
+
+              <div>
+                <strong>Smart check-in</strong>
+
+                <span>
+                  Know when it is time to check in.
+                </span>
+              </div>
+            </div>
+
+            <div className="feature">
+              <span className="feature-icon">!</span>
+
+              <div>
+                <strong>Silent protection</strong>
+
+                <span>
+                  A private PIN for emergencies.
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="auth-note">
+            <span>Private by design.</span>
+            <span>Your journey belongs to you.</span>
+          </div>
+        </div>
+
+        <div className="auth-card">
+          <div className="card-top">
+            <div className="card-kicker">
+              {registering
+                ? 'CREATE ACCOUNT'
+                : 'SIGN IN'}
+            </div>
+
+            <h2>
+              {registering
+                ? 'Create your Homeward account'
+                : 'Ready to head home?'}
+            </h2>
+
+            <p>
+              {registering
+                ? 'Set up your safety profile in less than a minute.'
+                : 'Sign in and keep your next journey protected.'}
+            </p>
+          </div>
 
           <form onSubmit={submit}>
             {registering && (
-              <label className="field-v3">
+              <label className="form-field">
                 <span>Your name</span>
-                <div className="input-wrap"><i>◉</i><input value={f.name} onChange={set('name')} autoComplete="name" placeholder="Your name" required /></div>
+
+                <input
+                  value={f.name}
+                  onChange={setField('name')}
+                  autoComplete="name"
+                  placeholder="Your name"
+                  required
+                />
               </label>
             )}
 
-            <label className="field-v3">
-              <span>Email</span>
-              <div className="input-wrap"><i>✉</i><input type="email" value={f.email} onChange={set('email')} autoComplete="email" placeholder="you@example.com" required /></div>
+            <label className="form-field">
+              <span>Email address</span>
+
+              <input
+                type="email"
+                value={f.email}
+                onChange={setField('email')}
+                autoComplete="email"
+                placeholder="you@example.com"
+                required
+              />
             </label>
 
-            <label className="field-v3">
+            <label className="form-field">
               <span>Password</span>
-              <div className="input-wrap"><i>⌾</i><input type="password" value={f.password} onChange={set('password')} autoComplete={registering ? 'new-password' : 'current-password'} minLength={registering ? 8 : undefined} placeholder="Your password" required /></div>
-              {registering && <small>At least 8 characters.</small>}
+
+              <input
+                type="password"
+                value={f.password}
+                onChange={setField('password')}
+                autoComplete={
+                  registering
+                    ? 'new-password'
+                    : 'current-password'
+                }
+                placeholder="Enter your password"
+                minLength={
+                  registering ? 8 : undefined
+                }
+                required
+              />
+
+              {registering && (
+                <small>
+                  Use at least 8 characters.
+                </small>
+              )}
             </label>
 
             {registering && (
-              <div className="pin-fields">
-                <label className="field-v3">
-                  <span>Check-in PIN <b>Optional</b></span>
-                  <div className="input-wrap"><i>✓</i><input inputMode="numeric" pattern="\d{4,6}" maxLength={6} value={f.cancelPin} onChange={set('cancelPin')} placeholder="4–6 digits" /></div>
-                  <small>Use this when you've arrived safely.</small>
+              <div className="pin-section">
+                <div className="pin-heading">
+                  <strong>Safety PINs</strong>
+                  <span>Optional</span>
+                </div>
+
+                <label className="form-field">
+                  <span>Check-in PIN</span>
+
+                  <input
+                    inputMode="numeric"
+                    pattern="\d{4,6}"
+                    maxLength={6}
+                    value={f.cancelPin}
+                    onChange={setField('cancelPin')}
+                    placeholder="4–6 digits"
+                  />
+
+                  <small>
+                    Used when you safely arrive at your
+                    destination.
+                  </small>
                 </label>
-                <label className="field-v3">
-                  <span>Silent alert PIN <b>Optional</b></span>
-                  <div className="input-wrap"><i>!</i><input inputMode="numeric" pattern="\d{4,6}" maxLength={6} value={f.duressPin} onChange={set('duressPin')} placeholder="Different 4–6 digits" /></div>
-                  <small>Looks like a normal check-in but can quietly alert your contacts.</small>
+
+                <label className="form-field">
+                  <span>Silent alert PIN</span>
+
+                  <input
+                    inputMode="numeric"
+                    pattern="\d{4,6}"
+                    maxLength={6}
+                    value={f.duressPin}
+                    onChange={setField('duressPin')}
+                    placeholder="4–6 digits"
+                  />
+
+                  <small>
+                    A different PIN that quietly alerts your
+                    trusted contacts.
+                  </small>
                 </label>
               </div>
             )}
 
-            {error && <p className="error" role="alert">{error}</p>}
+            {error && (
+              <div
+                className="auth-error"
+                role="alert"
+              >
+                {error}
+              </div>
+            )}
 
-            <button className="btn-v3 primary-v3 auth-submit" disabled={busy}>
-              {busy ? 'Please wait…' : registering ? 'Create my account  →' : 'Continue securely  →'}
+            <button
+              type="submit"
+              className="auth-submit"
+              disabled={busy}
+            >
+              {busy
+                ? 'Please wait…'
+                : registering
+                  ? 'Create account'
+                  : 'Continue securely'}
+
+              {!busy && <span>→</span>}
             </button>
           </form>
 
-          <div className="switch-auth">
-            {registering ? 'Already have an account?' : 'New to Homeward?'}
-            <button onClick={() => { setMode(registering ? 'login' : 'register'); setError(''); }}>
-              {registering ? 'Sign in' : 'Create an account'}
+          <div className="auth-switch">
+            <span>
+              {registering
+                ? 'Already have a Homeward account?'
+                : 'New to Homeward?'}
+            </span>
+
+            <button
+              type="button"
+              onClick={switchMode}
+            >
+              {registering
+                ? 'Sign in'
+                : 'Create an account'}
             </button>
           </div>
         </div>
       </section>
     </main>
   );
-}
-
-function NavBrand() {
-  return <div className="brand-v3"><span className="brand-symbol">✦</span><strong>Homeward</strong></div>;
 }

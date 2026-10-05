@@ -1,21 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
+
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+
 import { api } from '../api.js';
 
 const POLL_MS = 10000;
 
 function ago(iso) {
-  if (!iso) return '';
-
   const s = Math.max(
     0,
     Math.round((Date.now() - Date.parse(iso)) / 1000)
   );
 
   if (s < 30) return 'just now';
-  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+
+  if (s < 3600) {
+    return `${Math.round(s / 60)} min ago`;
+  }
 
   return `${Math.round(s / 3600)} h ago`;
 }
@@ -25,38 +28,29 @@ export default function Track() {
 
   const [data, setData] = useState(null);
   const [gone, setGone] = useState(false);
-  const [error, setError] = useState('');
 
   const mapEl = useRef(null);
   const map = useRef(null);
   const marker = useRef(null);
-  const accuracyCircle = useRef(null);
   const centered = useRef(false);
 
-  /*
-   * Get the latest location from the backend.
-   */
   useEffect(() => {
     let alive = true;
 
-    const load = async () => {
-      try {
-        const d = await api.track(token);
+    const load = () => {
+      api
+        .track(token)
+        .then((result) => {
+          if (!alive) return;
 
-        if (!alive) return;
-
-        setData(d);
-        setGone(false);
-        setError('');
-      } catch (e) {
-        if (!alive) return;
-
-        if (e.status === 404) {
-          setGone(true);
-        } else {
-          setError('Unable to load live location.');
-        }
-      }
+          setData(result);
+          setGone(false);
+        })
+        .catch((e) => {
+          if (alive && e.status === 404) {
+            setGone(true);
+          }
+        });
     };
 
     load();
@@ -69,50 +63,38 @@ export default function Track() {
     };
   }, [token]);
 
-  /*
-   * Create Leaflet map once.
-   */
   useEffect(() => {
-    if (!mapEl.current || map.current) return;
+    if (!mapEl.current) return;
 
-    const mapInstance = L.map(mapEl.current, {
-      center: [22.5, 79],
-      zoom: 5,
-      zoomControl: true,
-    });
+    map.current = L.map(mapEl.current, {
+      zoomControl: false,
+    }).setView([22.5, 79], 4);
+
+    L.control
+      .zoom({
+        position: 'bottomright',
+      })
+      .addTo(map.current);
 
     L.tileLayer(
-      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
       {
         maxZoom: 19,
-        attribution: '&copy; OpenStreetMap contributors',
+        attribution:
+          '&copy; OpenStreetMap contributors',
       }
-    ).addTo(mapInstance);
-
-    map.current = mapInstance;
-
-    /*
-     * Force Leaflet to recalculate the container size.
-     */
-    setTimeout(() => {
-      mapInstance.invalidateSize();
-    }, 200);
+    ).addTo(map.current);
 
     return () => {
       if (map.current) {
         map.current.remove();
-        map.current = null;
       }
 
+      map.current = null;
       marker.current = null;
-      accuracyCircle.current = null;
-      centered.current = false;
     };
   }, []);
 
-  /*
-   * Update marker whenever a new location arrives.
-   */
   useEffect(() => {
     if (
       !map.current ||
@@ -122,139 +104,192 @@ export default function Track() {
       return;
     }
 
-    const latitude = Number(data.latitude);
-    const longitude = Number(data.longitude);
+    const position = [
+      data.latitude,
+      data.longitude,
+    ];
 
-    if (
-      !Number.isFinite(latitude) ||
-      !Number.isFinite(longitude)
-    ) {
-      return;
-    }
-
-    const position = [latitude, longitude];
-
-    /*
-     * Create location marker.
-     */
     if (!marker.current) {
       marker.current = L.circleMarker(position, {
-        radius: 10,
+        radius: 11,
+
         color: '#ffffff',
-        weight: 3,
-        fillColor: '#f4b942',
+        weight: 4,
+
+        fillColor:
+          data.status === 'ALERTED'
+            ? '#c84747'
+            : '#267b63',
+
         fillOpacity: 1,
       }).addTo(map.current);
-
-      marker.current.bindPopup(
-        `<strong>Current location</strong><br/>` +
-        `Latitude: ${latitude.toFixed(6)}<br/>` +
-        `Longitude: ${longitude.toFixed(6)}`
-      );
     } else {
       marker.current.setLatLng(position);
+
+      marker.current.setStyle({
+        fillColor:
+          data.status === 'ALERTED'
+            ? '#c84747'
+            : '#267b63',
+      });
     }
 
-    /*
-     * Show approximate GPS accuracy if available.
-     */
-    if (data.accuracy != null) {
-      const accuracy = Number(data.accuracy);
-
-      if (Number.isFinite(accuracy) && accuracy > 0) {
-        if (!accuracyCircle.current) {
-          accuracyCircle.current = L.circle(position, {
-            radius: accuracy,
-            color: '#f4b942',
-            weight: 1,
-            fillColor: '#f4b942',
-            fillOpacity: 0.12,
-          }).addTo(map.current);
-        } else {
-          accuracyCircle.current.setLatLng(position);
-          accuracyCircle.current.setRadius(accuracy);
-        }
-      }
-    }
-
-    /*
-     * Center on the first real location.
-     */
     if (!centered.current) {
-      map.current.setView(position, 17);
+      map.current.setView(position, 16);
+
       centered.current = true;
     } else {
       map.current.panTo(position);
     }
-
-    /*
-     * Recalculate map dimensions after movement.
-     */
-    setTimeout(() => {
-      map.current?.invalidateSize();
-    }, 100);
   }, [data]);
 
-  let headline = 'Loading…';
-  let tone = '';
+  let state = 'loading';
 
   if (gone) {
-    headline = 'This link has expired or is not valid.';
+    state = 'expired';
+  } else if (data?.status === 'ARRIVED') {
+    state = 'arrived';
+  } else if (data?.status === 'ALERTED') {
+    state = 'alerted';
+  } else if (data?.status === 'CANCELLED') {
+    state = 'cancelled';
   } else if (data) {
-    if (data.status === 'ARRIVED') {
-      headline = `${data.name} arrived safely`;
-      tone = 'ok';
-    } else if (data.status === 'ALERTED') {
-      headline = `${data.name} hasn't checked in`;
-      tone = 'bad';
-    } else if (data.status === 'CANCELLED') {
-      headline = `${data.name} ended the journey`;
-      tone = 'ok';
-    } else {
-      headline =
-        `${data.name} is on the way to ${data.destination}`;
-    }
+    state = 'travelling';
   }
 
-  return (
-    <main className="track">
+  const config = {
+    loading: {
+      eyebrow: 'HOMEWARD',
+      title: 'Finding the journey…',
+      message: 'Please wait while we connect to the tracking link.',
+      icon: '○',
+    },
 
-      <section className={`track-head ${tone}`}>
-        <h1>{headline}</h1>
+    travelling: {
+      eyebrow: 'LIVE JOURNEY',
+      title: `${data.name} is on the way`,
+      message: `Heading to ${data.destination || 'their destination'}.`,
+      icon: '●',
+    },
+
+    arrived: {
+      eyebrow: 'JOURNEY COMPLETE',
+      title: `${data.name} arrived safely`,
+      message: 'This journey has ended. No further tracking is needed.',
+      icon: '✓',
+    },
+
+    alerted: {
+      eyebrow: 'CHECK-IN MISSED',
+      title: `${data.name} hasn't checked in`,
+      message:
+        'Their expected arrival time has passed and their trusted contacts have been alerted.',
+      icon: '!',
+    },
+
+    cancelled: {
+      eyebrow: 'JOURNEY ENDED',
+      title: `${data.name} ended the journey`,
+      message: 'This tracking link is no longer updating.',
+      icon: '✓',
+    },
+
+    expired: {
+      eyebrow: 'HOMEWARD',
+      title: 'Tracking link unavailable',
+      message:
+        'This link has expired or is no longer valid.',
+      icon: '—',
+    },
+  }[state];
+
+  return (
+    <main className={`public-track public-track-${state}`}>
+      <header className="public-track-header">
+        <div className="public-brand">
+          <span className="public-brand-mark">H</span>
+
+          <span>Homeward</span>
+        </div>
+
+        <span className="public-live-label">
+          {state === 'travelling'
+            ? 'LIVE'
+            : 'SAFETY TRACKING'}
+        </span>
+      </header>
+
+      <section className="public-track-info">
+        <div className="public-track-state">
+          <span>{config.icon}</span>
+
+          {config.eyebrow}
+        </div>
+
+        <h1>{config.title}</h1>
+
+        <p>{config.message}</p>
 
         {data && !gone && (
-          <p>
-            {data.lastSeen
-              ? `Location updated ${ago(data.lastSeen)}`
-              : 'Waiting for the first location update'}
+          <div className="public-meta">
+            {data.lastSeen && (
+              <span>
+                <b>●</b>
+                Updated {ago(data.lastSeen)}
+              </span>
+            )}
 
-            {data.batteryPct != null &&
-              ` · battery ${data.batteryPct}%`}
-          </p>
+            {data.batteryPct != null && (
+              <span>
+                Battery {data.batteryPct}%
+              </span>
+            )}
+          </div>
         )}
 
-        {error && (
-          <p className="error">
-            {error}
-          </p>
-        )}
+        {state === 'alerted' && (
+          <div className="public-alert">
+            <strong>Action may be needed</strong>
 
-        {tone === 'bad' && (
-          <p>
-            <strong>
-              Try calling them now. If you can't reach them,
+            <span>
+              Try calling them now. If you cannot reach them,
               call 112.
-            </strong>
-          </p>
+            </span>
+          </div>
         )}
       </section>
 
-      <div
-        ref={mapEl}
-        className="map"
-        aria-label="Map showing the last known location"
-      />
+      <section className="public-map-wrap">
+        <div
+          ref={mapEl}
+          className="public-map"
+          aria-label="Map showing the last known location"
+        />
 
+        {state === 'loading' && (
+          <div className="map-loading">
+            <span />
+            Loading location…
+          </div>
+        )}
+
+        {state === 'expired' && (
+          <div className="map-message">
+            <div>—</div>
+            No active tracking
+          </div>
+        )}
+      </section>
+
+      <footer className="public-track-footer">
+        <span>
+          Homeward keeps journeys private.
+        </span>
+
+        <span>
+          Location refreshes automatically.
+        </span>
+      </footer>
     </main>
   );
 }
